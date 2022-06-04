@@ -1,79 +1,63 @@
-﻿module TransportTycoon
+﻿open System.IO
 
-open System.IO
+type Tree<'T> =
+    | Branch of 'T * Tree<'T> seq
+    | Leaf of 'T
 
-type Connection = { From:string; To:string; Distance:int }
+type Waypoint = { Location:string; Route:string list; TotalDistance:int }
 
-module List = 
-    // Thanks to Rich Minerich http://www.fssnip.net/4u/title/Very-Fast-Permutations
-    let rec permutations = function
-        | []      -> seq [List.empty]
-        | x :: xs -> Seq.collect (insertions x) (permutations xs)
-    and insertions x = function
-        | []             -> [[x]]
-        | (y :: ys) as xs -> (x::xs)::(List.map (fun x -> y::x) (insertions x ys))
+type Connection = { Start:string; Finish:string; Distance:int }
 
-let lines = 
-    Path.Combine(__SOURCE_DIRECTORY__, "resources", "data.csv")
+let loadData path =
+    path
     |> File.ReadAllText
-    |> fun data -> data.Split(System.Environment.NewLine)
+    |> fun text -> text.Split(System.Environment.NewLine)
     |> Array.skip 1
-
-let myData = [
-    for line in lines do
-        match line.Split("\t") with
-        | [|A; B; Km|] -> 
-            { From = A.Trim(); To = B.Trim(); Distance = int Km }
-            { From = B.Trim(); To = A.Trim(); Distance = int Km }
-        | _ -> ()
-]
-
-let locations = 
-    myData
-    |> List.map (fun x -> x.From)
-    |> List.distinct
-
-let connectionMap =
-    myData
-    |> List.map (fun x -> (x.From, x.To), x)
+    |> fun rows -> [
+        for row in rows do
+            match row.Split(",") with
+            | [|start;finish;distance|] -> 
+                { Start = start; Finish = finish; Distance = int distance }
+                { Start = finish; Finish = start; Distance = int distance }
+            | _ -> failwith "Row is badly formed"
+    ]
+    |> List.groupBy (fun cn -> cn.Start)
     |> Map.ofList
 
-let allPermutationsFrom start = 
-    locations
-    |> List.permutations 
-    |> Seq.toList
-    |> List.filter (fun x -> x.Head = start)
+let getUnvisited connections current =
+    connections
+    |> List.filter (fun cn -> current.Route |> List.exists (fun loc -> loc = cn.Finish) |> not)
+    |> List.map (fun cn -> { 
+        Location = cn.Finish
+        Route = cn.Start :: current.Route
+        TotalDistance = cn.Distance + current.TotalDistance })
 
-let endAt finish possible = 
-    let index = List.findIndex (fun x -> x = finish) possible
-    possible
-    |> List.splitAt (index + 1)
-    |> fst
+let rec treeToList tree =
+    match tree with 
+    | Leaf x -> [x]
+    | Branch (_, xs) -> List.collect treeToList (xs |> Seq.toList)
 
-let getCandidates start finish = 
-    allPermutationsFrom start
-    |> List.map (endAt finish)
-    |> List.distinct
+let findPossibleRoutes start finish (routeMap:Map<string, Connection list>) =
+    let rec loop current =
+        let nextRoutes = getUnvisited routeMap[current.Location] current
+        if nextRoutes |> List.isEmpty |> not && current.Location <> finish then
+            Branch (current, seq { for next in nextRoutes do loop next })
+        else 
+            Leaf current
+    loop { Location = start; Route = []; TotalDistance = 0 }
+    |> treeToList
+    |> List.filter (fun wp -> wp.Location = finish)
 
-let findShortestRoute start finish =
-    getCandidates start finish
-    |> List.map (fun route -> 
-        route 
-        |> List.pairwise
-        |> List.map (fun conn -> Map.tryFind conn connectionMap)
-    )
-    |> List.filter (fun x -> x |> List.forall (fun z -> z <> None))
-    |> List.map (fun x -> 
-        x 
-        |> List.choose id 
-        |> List.map (fun connection -> connection.To, connection.Distance)
-        |> List.fold (fun acc (loc,dist) -> (fst acc + "," + loc, snd acc + dist)) (start, 0)    
-    )
-    |> List.minBy snd
+let selectShortestRoute routes =
+    routes 
+    |> List.minBy (fun wp -> wp.TotalDistance)
+    |> fun wp -> wp.Location :: wp.Route |> List.rev, wp.TotalDistance
 
 [<EntryPoint>]
 let main argv =
-    findShortestRoute argv.[0] argv.[1]
-    |> fun x -> printfn "%s" (fst x)
+    Path.Combine(__SOURCE_DIRECTORY__, "resources", "data.csv") 
+    |> loadData
+    |> findPossibleRoutes argv[0] argv[1]
+    |> selectShortestRoute
+    |> printfn "%A"
     0
-
