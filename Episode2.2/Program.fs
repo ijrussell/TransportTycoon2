@@ -51,10 +51,19 @@ let selectFastestRoute routes =
     routes 
     |> List.minBy (fun wp -> wp.Duration)
 
-let prepareOutput start waypoint =
+// let prepareOutput start waypoint =
+//     waypoint
+//     |> fun wp -> (wp.Location, wp.Duration) :: wp.Route |> List.rev |> List.tail
+//     |> List.fold (fun acc (loc,time) -> fst acc + "\n" + $"%.2f{time}h  ARRIVE  {loc}", 0M) ($"00.00h  DEPART  {start}", 0M)
+//     |> fst    
+
+let prepareOutput waypoint =
     waypoint
-    |> fun wp -> (wp.Location, wp.Duration) :: wp.Route |> List.rev |> List.tail
-    |> List.fold (fun acc (loc,time) -> fst acc + "\n" + $"%.2f{time}h  ARRIVE  {loc}", 0M) ($"00.00h  DEPART  {start}", 0M)
+    |> fun wp -> (wp.Location, wp.Duration) :: wp.Route |> List.rev
+    |> function
+        | [] -> failwith "No route to output"
+        | head::tail ->     
+            tail |> List.fold (fun acc (loc,time) -> fst acc + "\n" + $"%.2f{time}h  ARRIVE  {loc}", 0M) ($"00.00h  DEPART  {fst head}", 0M)
     |> fst    
 
 [<EntryPoint>]
@@ -63,6 +72,6 @@ let main argv =
     |> loadData
     |> findPossibleRoutes argv[0] argv[1]
     |> selectFastestRoute
-    |> prepareOutput argv[0]
+    |> prepareOutput
     |> printfn "%A"
     0
